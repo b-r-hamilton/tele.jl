@@ -3,6 +3,12 @@ uuid = "df21f4ec-a846-4bac-b522-4c18cd2e4618"
 authors = ["Brynnydd Hamilton"]
 version = "0.1.0"
 
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+PyPlot = "d330b81b-6aea-500a-939a-2ce795aea3ee"
+
 [compat]
 julia = "1.6"
 
