@@ -1,7 +1,7 @@
 module tele
 using NCDatasets, Dates, PyCall, Revise, PyPlot, Statistics, NaNMath
 
-export read_netcdf, contplot, anomaly, batch_open, character, filtseriesplot, fftplot
+export read_netcdf, contplot, anomaly, batch_open, character, filtseriesplot, fftplot, yearly_mean, spatial_mean, temp_mean
 
 const ccrs = PyNULL()
 const cfeature = PyNULL()
@@ -60,7 +60,9 @@ function read_netcdf(path, varname, bbox)
 
    subdata = nc[varname][minimum([o1,o2]):maximum([o1,o2]), minimum([a1, a2]):maximum([a1, a2]), :]
    na = nc[varname].attrib["missing_value"]
-   replace!(subdata,na => 0)
+   replace!(subdata,na => NaN)
+   replace!(subdata,missing=> NaN)
+   subdata = Float64.(subdata)
    return lat[minimum([a1, a2]):maximum([a1, a2])], lon[minimum([o1,o2]):maximum([o1,o2])], time, subdata
 
 end
@@ -122,8 +124,8 @@ function anomaly(data, time)
       #find indices of months of interest
       bool_t_ind = findfirst.(isequal.(m), (i,)).== nothing
       t_ind = findall(x->x==0, bool_t_ind)
-      marray[:, :, i] .= mean(data[:,:,t_ind], dims = 3)[:,:,1]
-      sarray[:,:, i] .= std(data[:,:,t_ind], dims = 3)[:,:,1]
+      marray[:, :, i] .= temp_mean(data[:,:,t_ind])
+      sarray[:,:, i] .= temp_std(data[:,:,t_ind])
    end
 
    for i in range(1, stop = length(time), step = 1)
@@ -131,9 +133,28 @@ function anomaly(data, time)
       anomaly[:,:,i] = (data[:,:,i] .- marray[:,:, m_index]) ./ sarray[:,:,m_index]
    end
 
-   replace!(anomaly, NaN=>0)
    return anomaly
 
+end
+
+#assume a continuous series of monthly values
+function yearly_mean(time, vals)
+   initial_month = Dates.month(time[1])
+   initial_year = Dates.year(time[1])
+   stop_month = Dates.month(time[end])
+   stop_year = Dates.year(time[end])
+   years = range(initial_year, stop = stop_year, step = 1)
+   ann_avg = zeros(length(years))
+   ann_avg[1] = mean(vals[1:13-initial_month])
+   ann_avg[end] = mean(vals[end - stop_month+1:end])
+
+   for i in range(2, length(ann_avg)-1, step = 1)
+      start_index = 12-initial_month + (i-1)*12
+      stop_index = start_index + 12
+      ann_avg[i] = mean(vals[start_index:stop_index])
+   end
+
+   return ann_avg, years
 end
 
 function character(series)
@@ -142,7 +163,7 @@ function character(series)
     mean = NaNMath.mean(series)
     median = NaNMath.median(series)
     std = NaNMath.std(series)
-    dict = Dict("min"=>min, "max"=> max, "mean"=>mean, "median"=>median, "std"=>std)
+    dict = Dict(:min=>min, :max=> max, :mean=>mean, :median=>median, :std=>std)
     return dict
 end
 
@@ -152,22 +173,30 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
     plot(series1time, series1)
     plot(series1time[2:end], series1filt[2:end])
     x_ind1 = range(1, stop = length(series1time), step = 1)
-    series1filt_slope = normalequation(x_ind1, series1filt)
-    series1filt_ne = series1filt_slope*x_ind1
+    s1_avg = mean(series1filt)
+    series1filt_slope = normalequation(x_ind1, series1filt .- s1_avg)
+    series1filt_ne = series1filt_slope*x_ind1 .+ s1_avg
     plot(series1time, series1filt_ne, color = "r")
-    text(x = Date(1700,1,1), y = 3, s = "slope = " *string(round(series1filt_slope, digits =6)))
+    xpos = series1time[1000]
+    ypos = s1_avg
+    text(xpos, ypos, s = "slope = " *string(round(series1filt_slope, digits =6))*"°C/month")
     legend(["CESM", "CESM smoothed", "CESM smoothed trend"])
     xlabel("time")
     ylabel("SST Anomaly [°C]")
 
+
     subplot(1,2,2)
     plot(series2time, series2)
-    plot(series2time[2:end], series2filt[2:end])
-    x_ind2 = range(1, stop = length(series2time[20:end]), step = 1)
-    series2filt_slope = normalequation(x_ind2, series2filt[20:end])
-    series2filt_ne = series2filt_slope*x_ind2
-    plot(series2time[20:end], series2filt_ne, color = "r")
-    text(x = Date(1880,1,1), y = 3, s = "slope = " *string(round(series2filt_slope, digits =6)))
+    plot(series2time[50:end], series2filt[50:end])
+    x_ind2 = range(1, stop = length(series2time[50:end]), step = 1)
+    s2_avg = mean(series2filt[50:end])
+    print(s2_avg)
+    series2filt_slope = normalequation(x_ind2, series2filt[50:end] .- s2_avg)
+    series2filt_ne = series2filt_slope*x_ind2 .+ s2_avg
+    plot(series2time[50:end], series2filt_ne, color = "r")
+    xpos = series2time[1000]
+    ypos = s2_avg
+    text(xpos, ypos, s = "slope = " *string(round(series2filt_slope, digits =6))*"°C/month")
     xlabel("time")
     legend(["ERSST", "ERSST smoothed", "ERSST smoothed trend"])
     suptitle(t)
@@ -217,4 +246,49 @@ function normalequation(x,y)
    return val
 end
 
+#take a 3d array (lat, lon, time) and compute the spatial mean IGNORING NAN VALUES
+#JULIA IS STUPID AND WONT DO THIS WITH "SKIPMISSING" FOR A 3D ARRAY
+function temp_mean(array)
+   avg = similar(array)[:,:,1]
+
+   for i in range(1, stop = size(avg)[1], step = 1)
+      for j in range(1, stop = size(avg)[2], step = 1)
+         ts = array[i, j, :]
+         avg[i, j] = NaNMath.mean(ts)
+      end
+   end
+   return avg
+end
+
+function temp_std(array)
+   avg = similar(array)[:,:,1]
+
+   for i in range(1, stop = size(avg)[1], step = 1)
+      for j in range(1, stop = size(avg)[2], step = 1)
+         ts = array[i, j, :]
+         avg[i, j] = NaNMath.std(ts)
+      end
+   end
+   return avg
+end
+
+function spatial_mean(array)
+   avg = similar(array)[1,1,:]
+   for i in range(1, stop = size(array)[3], step = 1)
+      ts = array[:,:, i]
+      ts = vcat(ts...)#flatten
+      avg[i] = NaNMath.mean(ts)
+   end
+   return avg
+end
+
+function spatial_std(array)
+   avg = similar(array)[1,1,:]
+   for i in range(1, stop = size(array)[3], step = 1)
+      ts = array[:,:, i]
+      ts = vcat(ts...)#flatten
+      avg[i] = NaNMath.std(ts)
+   end
+   return avg
+end
 end

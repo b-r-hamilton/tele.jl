@@ -1,13 +1,14 @@
 using tele
 using NCDatasets, Revise, Statistics, PyPlot
-using CFTime, DSP, NaNMath, FFTW
-using DataFrames
+using CFTime, DSP, FFTW
+using DataFrames, NaNMath
 #analyzing data from https://psl.noaa.gov/data/gridded/data.noaa.ersst.v5.html
 
 #FILE PATHS
 data_dir = "/home/brynn/Documents/JP/860/tsa_data/"
 ersst_p = data_dir * "sst.mnmean.nc"
 cesm_p2 = data_dir * "tos_Omon_CCSM4_past1000_r1i1p1_135001-185012.nc"
+
 
 #READ NETCDFS TO BOUNDING BOX
 bbox = [-72, -60, 300, 315]
@@ -18,32 +19,32 @@ bbox = [-72, -60, 300, 315]
 responsetype = Lowpass(0.1*10^(-7),fs = 3.80265176 * 10^(-7))
 designmethod = Butterworth(4)
 
+
 #COMPUTE TIME SERIES (MEAN OVER BBOX, MEAN ANOMALY OVER BBOX, FILTER EACH)
 #ersst
 anome = anomaly(datae, timee)
-tavge_anom = mean(anome, dims = (1,2))[1,1,:]
-tavge_raw = mean(datae, dims = (1,2))[1,1,:]
+tavge_anom = spatial_mean(anome)
+tavge_raw = spatial_mean(datae)
 tavge_anom_filt = filt(digitalfilter(responsetype, designmethod), tavge_anom)
 tavge_raw_filt = filt(digitalfilter(responsetype, designmethod), tavge_raw)
 
 #cesm
 timec = reinterpret(typeof(timee[begin]), timec) #convert from DatetimeNoLeap to DateTime
-replace!(datac, missing=>NaN) #convert missing vals to NaN
-datac = Float32.(datac) #convert to Float32 (used to be Union{Missing, Float32} but our missing are gone anyways)
+# datac = Float32.(datac) #convert to Float32 (used to be Union{Missing, Float32} but our missing are gone anyways)
 datac = datac .- 273.15 #convert to celsius
+
 anomc = anomaly(datac, timec)
-tavgc_anom = mean(anomc, dims = (1,2))[1,1,:]
-replace!(datac, NaN=>0) #convert missing vals to NaN
-tavgc_raw = mean(datac, dims = (1,2))[1,1,:]
+tavgc_anom = spatial_mean(anomc)
+tavgc_raw = spatial_mean(datac)
 tavgc_anom_filt = filt(digitalfilter(responsetype, designmethod), tavgc_anom)
 tavgc_raw_filt = filt(digitalfilter(responsetype, designmethod), tavgc_raw)
 
 #Make contour plots
 savetype = ".png"
-contplot(latc,lonc,mean(datac, dims = 3)[:,:], "images/datac"*savetype)
-contplot(late,lone,mean(datae, dims = 3)[:,:], "images/datae"*savetype)
-contplot(latc,lonc,mean(anomc, dims = 3)[:,:], "images/anomc"*savetype)
-contplot(late,lone,mean(anome, dims = 3)[:,:], "images/anome"*savetype)
+contplot(latc,lonc,temp_mean(datac), "images/datac"*savetype)
+contplot(late,lone,temp_mean(datae), "images/datae"*savetype)
+contplot(latc,lonc,temp_mean(anomc), "images/anomc"*savetype)
+contplot(late,lone,temp_mean(anome), "images/anome"*savetype)
 
 #Make time series plots
 filtseriesplot(tavgc_raw[6012 - 2013:end], tavgc_raw_filt[6012 - 2013:end], timec[6012 - 2013:end], tavge_raw, tavge_raw_filt, timee, "Average Time Series in ROI", "images/raw"*savetype)
@@ -86,3 +87,8 @@ title("ERSST")
 boxplot([tavge_raw, tavge_anom], notch = true, labels = ["Raw", "Anomaly"])
 savefig("images/boxes"*savetype)
 close()
+
+
+df = DataFrame(median = [], max = [], min = [], mean = [], std = [])
+push!(df, character(tavgc_raw))
+push!(df, character(tavge_raw))
