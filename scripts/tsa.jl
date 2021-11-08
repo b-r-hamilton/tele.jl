@@ -79,16 +79,12 @@ close()
 #histogram
 #fig2b - boxplotGPCC Total # of Precips Obs
 figure()
-subplot(1,2,1)
-title("CESM")
-boxplot([tavgc_raw, tavgc_anom], notch = true, labels =  ["Raw", "Anomaly"])
-subplot(1,2,2)
-title("ERSST")
-boxplot([tavge_raw, tavge_anom], notch = true, labels = ["Raw", "Anomaly"])
+boxplot([tavge_raw, tavgc_raw], notch = true, labels =  ["ERSST", "CESM"])
+ylabel("SST [°C]")
 savefig("images/boxes"*savetype)
 close()
 
 
-df = DataFrame(median = [], max = [], min = [], mean = [], std = [])
-push!(df, character(tavgc_raw))
+df = DataFrame(min = [], max = [], mean = [], median = [], std = [])
 push!(df, character(tavge_raw))
+push!(df, character(tavgc_raw))

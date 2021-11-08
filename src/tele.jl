@@ -99,10 +99,20 @@ function contplot(lat,lon, data,s)
    figure()
    ax = subplot(projection = ccrs.SouthPolarStereo())
    ax.gridlines()
-   ax.set_extent([-180, 180, -90, -60], ccrs.PlateCarree())
+   ax.set_extent([-180, 0, -90, -50], ccrs.PlateCarree())
+   gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
+                     linewidth=2, color="gray", alpha=0.5, linestyle="--")
+   gl.ylabels_right = false
    ax.coastlines()
-   cf = contourf(lon,lat,transpose(data), cmap = "coolwarm", transform=ccrs.PlateCarree())
-   colorbar(cf)
+   max = NaNMath.maximum(vcat(data...))
+   min = NaNMath.minimum(vcat(data...))
+   println(min, max)
+   val = maximum([abs(max), abs(min)])
+
+   cf = contourf(lon,lat,transpose(data), cmap = "coolwarm", levels = range(-val, stop = val, length = 10), transform=ccrs.PlateCarree())
+   cb = colorbar(cf)
+   cb.set_label("SST [°C]")
+   tight_layout()
    savefig(s)
    close()
 end
@@ -179,10 +189,14 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
     plot(series1time, series1filt_ne, color = "r")
     xpos = series1time[1000]
     ypos = s1_avg
-    text(xpos, ypos, s = "slope = " *string(round(series1filt_slope, digits =6))*"°C/month")
-    legend(["CESM", "CESM smoothed", "CESM smoothed trend"])
+    legend(["CESM", "CESM smoothed", "CESM smoothed trend: "* string(round(series1filt_slope, digits =6))])
     xlabel("time")
-    ylabel("SST Anomaly [°C]")
+    if s == "images/anom.pdf"
+    ylabel("SST Anomaly [σ]")
+   else
+      ylabel("SST [°C]")
+   end
+
 
 
     subplot(1,2,2)
@@ -196,9 +210,8 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
     plot(series2time[50:end], series2filt_ne, color = "r")
     xpos = series2time[1000]
     ypos = s2_avg
-    text(xpos, ypos, s = "slope = " *string(round(series2filt_slope, digits =6))*"°C/month")
     xlabel("time")
-    legend(["ERSST", "ERSST smoothed", "ERSST smoothed trend"])
+    legend(["ERSST", "ERSST smoothed", "ERSST smoothed trend: " * string(round(series2filt_slope, digits =6))])
     suptitle(t)
     savefig(s)
     close()

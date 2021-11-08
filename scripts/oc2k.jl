@@ -24,9 +24,8 @@ savetype = ".png"
 bbox = [-63, -65, 295, 297]
 (latc, lonc, timec1, datac1) = read_netcdf(cesm_p1, "tos", bbox)
 (latc, lonc, timec, datac) = read_netcdf(cesm_p2, "tos", bbox)
-datac = Float32.(datac) #convert to Float32 (used to be Union{Missing, Float32} but our missing are gone anyways)
 datac = datac .- 273.15 #convert to celsius
-contplot(latc,lonc,mean(skipmissing(data)c, dims = 3)[:,:], "images/oc2k"*savetype)
+contplot(latc,lonc,temp_mean(datac), "images/oc2k"*savetype)
 
 #FILTER CHARACTERISTICS
 responsetype = Lowpass(0.1*10^(-7),fs = 3.80265176 * 10^(-7))
@@ -36,8 +35,8 @@ designmethod = Butterworth(4)
 timec = reinterpret(DateTime, timec) #convert from DatetimeNoLeap to DateTime
 
 anomc = anomaly(datac, timec)
-tavgc_anom = mean(skipmissing(anomc), dims = (1,2))[1,1,:]
-tavgc_raw = mean(skipmissing(datac), dims = (1,2))[1,1,:]
+tavgc_anom = spatial_mean(anomc)
+tavgc_raw = spatial_mean(datac)
 
 
 using PyPlot
