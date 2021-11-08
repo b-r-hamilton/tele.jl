@@ -7,11 +7,12 @@ using DataFrames, NaNMath
 #FILE PATHS
 data_dir = "/home/brynn/Documents/JP/860/tsa_data/"
 ersst_p = data_dir * "sst.mnmean.nc"
-cesm_p2 = data_dir * "tos_Omon_CCSM4_past1000_r1i1p1_135001-185012.nc"
+# cesm_p2 = data_dir * "tos_Omon_CCSM4_past1000_r1i1p1_135001-185012.nc"
+cesm_p2 = data_dir * "tos_Omon_CCSM4_historical_r1i1p1_185001-200512.nc"
 
 
 #READ NETCDFS TO BOUNDING BOX
-bbox = [-72, -60, 300, 315]
+bbox = [-75, -55, 290, 315]
 (late, lone, timee, datae) = read_netcdf(ersst_p, "sst", bbox)
 (latc, lonc, timec, datac) = read_netcdf(cesm_p2, "tos", bbox)
 
@@ -40,15 +41,15 @@ tavgc_anom_filt = filt(digitalfilter(responsetype, designmethod), tavgc_anom)
 tavgc_raw_filt = filt(digitalfilter(responsetype, designmethod), tavgc_raw)
 
 #Make contour plots
-savetype = ".png"
+savetype = ".pdf"
 contplot(latc,lonc,temp_mean(datac), "images/datac"*savetype)
 contplot(late,lone,temp_mean(datae), "images/datae"*savetype)
 contplot(latc,lonc,temp_mean(anomc), "images/anomc"*savetype)
 contplot(late,lone,temp_mean(anome), "images/anome"*savetype)
 
 #Make time series plots
-filtseriesplot(tavgc_raw[6012 - 2013:end], tavgc_raw_filt[6012 - 2013:end], timec[6012 - 2013:end], tavge_raw, tavge_raw_filt, timee, "Average Time Series in ROI", "images/raw"*savetype)
-filtseriesplot(tavgc_anom[6012 - 2013:end], tavgc_anom_filt[6012 - 2013:end], timec[6012 - 2013:end], tavge_anom, tavge_anom_filt, timee, "Average Anomaly Time Series in ROI", "images/anom"*savetype)
+filtseriesplot(tavgc_raw, tavgc_raw_filt, timec, tavge_raw, tavge_raw_filt, timee, "", "images/raw"*savetype)
+filtseriesplot(tavgc_anom, tavgc_anom_filt, timec, tavge_anom, tavge_anom_filt, timee, "", "images/anom"*savetype)
 
 #COMPUTE FFTs
 ffte_raw = fft(tavge_raw)
@@ -63,11 +64,11 @@ fftc_freq = FFTW.fftfreq(length(timec), 3.80265176 * 10^(-7))
 fftplot(ffte_freq[:], [ffte_raw, ffte_anom], "images/ffte"*savetype, "ERSST")
 fftplot(fftc_freq[:], [fftc_raw, fftc_anom], "images/fftc"*savetype, "CESM")
 
-#Plot
+#Plot FFT
 figure()
 halfway = 1006
 plot(ffte_freq[begin+1:halfway], abs.(ffte_raw)[begin+1:halfway], alpha = 0.5)
-halfway = 3006
+halfway = 936
 plot(fftc_freq[begin+1:halfway], abs.(fftc_raw)[begin+1:halfway], alpha = 0.5)
 ylabel("Frequency [Hz]")
 xlabel("Intensity")
@@ -78,13 +79,26 @@ close()
 
 #histogram
 #fig2b - boxplotGPCC Total # of Precips Obs
-figure()
-boxplot([tavge_raw, tavgc_raw], notch = true, labels =  ["ERSST", "CESM"])
+figure(figsize = (6, 8))
+boxdict = boxplot([tavge_raw, tavgc_raw], notch = true, labels =  ["ERSST", "CESM (1850 - 2005)"])
+grid(true)
 ylabel("SST [°C]")
-savefig("images/boxes"*savetype)
+savefig("images/boxes_ersst"*savetype)
 close()
 
 
+#Extreme values analysis
 df = DataFrame(min = [], max = [], mean = [], median = [], std = [])
 push!(df, character(tavge_raw))
 push!(df, character(tavgc_raw))
+
+quant = quantile(tavgc_raw, [0.25, 0.5, 0.75])
+thresh = (quant[3] - quant[1])* 1.5 + quant[3]
+ind = findall(>(thresh), tavgc_raw)
+
+extreme1 = temp_mean(datac[:,:, ind])
+extreme2 = temp_mean(anomc[:,:, ind])
+
+#Pot extreme values 
+contplot(latc,lonc,extreme1, "images/ext_raw"*savetype)
+contplot(latc,lonc,extreme2, "images/ext_anom"*savetype)

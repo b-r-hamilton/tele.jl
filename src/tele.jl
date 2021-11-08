@@ -34,13 +34,12 @@ function nc_dims(nc)
 end
 
 """
-   function read_netcdf(path, varname, bbox, months)
-   Read in NetCDF file and spatially subset into square bounding box and temporally subset into months of interest
+   function read_netcdf(path, varname, bbox)
+   Read in NetCDF file and spatially subset into square bounding box
 # Arguments#
 - `path`: string, path to netcdf file
 - `varname`: string, name of variable you want to read
 - `bbox`: geographic bounding box in format [latmin, latmax, lonmin, lonmax]
-- `months`: array of months of interest (i.e. [7,8,9] means [july, aug, sept])
 # Output
 - `lat`: subsetted lat
 - `lon`: subsetted lon
@@ -64,28 +63,8 @@ function read_netcdf(path, varname, bbox)
    replace!(subdata,missing=> NaN)
    subdata = Float64.(subdata)
    return lat[minimum([a1, a2]):maximum([a1, a2])], lon[minimum([o1,o2]):maximum([o1,o2])], time, subdata
-
 end
 
-function batch_open(paths, varname, bbox)
-   times = []
-   lat = []
-   lon = []
-   data = []
-   for i in paths
-      a, o, t, d = read_netcdf(i, varname, bbox)
-      lat = a
-      lon = o
-      append!(times, t)
-      if paths[1] == i
-         data = d
-      else
-         data = cat(data, d, dims = 3)
-      end
-   return lat, lon, times, data
-   end
-
-end
 #this is hacky!
 function load_python()
    copy!(ccrs, pyimport("cartopy.crs"))
@@ -94,6 +73,15 @@ function load_python()
    copy!(ticker, pyimport("matplotlib.ticker"))
 end
 
+"""
+   function contplot(lat, lon, data, s)
+   Make a contour plot of data (assumes SouthPolarStereo view) and save
+# Arguments#
+- `lat`
+- `lon`
+- `data`: data in (lat x lon x time) format
+- `s`: file path to save to
+"""
 function contplot(lat,lon, data,s)
    load_python()
    figure()
@@ -111,12 +99,21 @@ function contplot(lat,lon, data,s)
 
    cf = contourf(lon,lat,transpose(data), cmap = "coolwarm", levels = range(-val, stop = val, length = 10), transform=ccrs.PlateCarree())
    cb = colorbar(cf)
-   cb.set_label("SST [°C]")
+   cb.set_label("SST [σ]")
    tight_layout()
    savefig(s)
    close()
 end
 
+"""
+   function anomaly(data, time)
+   Remove seasonality by computing the anomaly (stdev away from mean) w.r.t. behavior in month
+# Arguments#
+- `data`: array of data in (lat x lon x time) format
+- `time`: array of DateTime
+# Output
+- `anomaly`: array of same dimensions of `data` where each value is the anomaly in stdev
+"""
 function anomaly(data, time)
    anomaly = similar(data)
 
@@ -147,17 +144,30 @@ function anomaly(data, time)
 
 end
 
-#assume a continuous series of monthly values
+"""
+   function yearly_mean(time, vals)
+   Compute annual average of 1d array (assumes data is ordered AND continuous)
+# Arguments#
+- `time`: array of time values (DateTime)
+- `vals`: array of associated values
+# Output
+- `ann_avg`: annual average of `vals`
+- `years`: list of years associated with `ann_avg`
+"""
 function yearly_mean(time, vals)
    initial_month = Dates.month(time[1])
    initial_year = Dates.year(time[1])
    stop_month = Dates.month(time[end])
    stop_year = Dates.year(time[end])
-   years = range(initial_year, stop = stop_year, step = 1)
+
+   years = range(initial_year, stop = stop_year, step = 1) #array of all possible years
+
    ann_avg = zeros(length(years))
+   #compute first and last values, because we might not have 12 months in first or last year
    ann_avg[1] = mean(vals[1:13-initial_month])
    ann_avg[end] = mean(vals[end - stop_month+1:end])
 
+   #iterate through, computing the average for every 12 months, starting from end of year 1
    for i in range(2, length(ann_avg)-1, step = 1)
       start_index = 12-initial_month + (i-1)*12
       stop_index = start_index + 12
@@ -167,6 +177,14 @@ function yearly_mean(time, vals)
    return ann_avg, years
 end
 
+"""
+   function character(series)
+   Compute statistics for a series
+# Arguments#
+- `series`: array of floats, can have NaN values (will be ignored)
+# Output
+- `dict`: dictionary of statistics
+"""
 function character(series)
     min = NaNMath.minimum(series)
     max = NaNMath.maximum(series)
@@ -177,6 +195,11 @@ function character(series)
     return dict
 end
 
+"""
+   function filtseriesplot(series)
+      This is a pretty specific function - don't need to go into everything
+      Makes plot with 2 subplots, each has raw data, filtered data, and a trendline
+"""
 function filtseriesplot(series1, series1filt, series1time, series2, series2filt, series2time, t, s)
     figure(figsize = (10, 4))
     subplot(1,2,1)
@@ -197,8 +220,6 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
       ylabel("SST [°C]")
    end
 
-
-
     subplot(1,2,2)
     plot(series2time, series2)
     plot(series2time[50:end], series2filt[50:end])
@@ -217,6 +238,15 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
     close()
 end
 
+"""
+   function fftplot(ffte_freq, ffte, s, t)
+   Plot frequency vs intensity for FFTW resuls
+# Arguments#
+- `ffte_freq`: output of FFTW.fft_freq
+- `ffte`: ouptu of FFTW.fft
+- `s`: save strng
+- `t`:title string
+"""
 function fftplot(ffte_freq, ffte, s, t)
    load_python()
    figure()
@@ -253,14 +283,29 @@ function fftplot(ffte_freq, ffte, s, t)
 
 end
 
-#linear regression with least square cost function
+"""
+   function normalequation(x,y)
+   Linear regression with least squares fit
+   Assumes y-intercept is already 0 (mean removed )
+# Arguments#
+- `x`: dependent variable
+- `y`: independent variable
+# Output
+- `val`: slope of line of best fit
+"""
 function normalequation(x,y)
    val = inv(transpose(x)*x)*transpose(x)*y
    return val
 end
 
-#take a 3d array (lat, lon, time) and compute the spatial mean IGNORING NAN VALUES
-#JULIA IS STUPID AND WONT DO THIS WITH "SKIPMISSING" FOR A 3D ARRAY
+"""
+   function tempmean(array)
+   Computes temporal mean of 3d array, IGNORING NANs
+# Arguments#
+- `array`: 3d float array in format (lat x lon x time)
+# Output
+- `avg`: 2d array in format (lat x lon), where every value is temporal average
+"""
 function temp_mean(array)
    avg = similar(array)[:,:,1]
 
@@ -273,6 +318,14 @@ function temp_mean(array)
    return avg
 end
 
+"""
+   function tempstd(array)
+   Computes temporal standard deviation of 3d array, IGNORING NANs
+# Arguments#
+- `array`: 3d float array in format (lat x lon x time)
+# Output
+- `avg`: 2d array in format (lat x lon), where every value is temporal standard deviation
+"""
 function temp_std(array)
    avg = similar(array)[:,:,1]
 
@@ -285,6 +338,14 @@ function temp_std(array)
    return avg
 end
 
+"""
+   function spatial_mean(array)
+   Computes spatial average of 3d array, IGNORING NANs
+# Arguments#
+- `array`: 3d float array in format (lat x lon x time)
+# Output
+- `avg`: 1d array in format (time), where every value is spatial average at that time
+"""
 function spatial_mean(array)
    avg = similar(array)[1,1,:]
    for i in range(1, stop = size(array)[3], step = 1)
@@ -295,6 +356,14 @@ function spatial_mean(array)
    return avg
 end
 
+"""
+   function spatial_std(array)
+   Computes spatial average of 3d array, IGNORING NANs
+# Arguments#
+- `array`: 3d float array in format (lat x lon x time)
+# Output
+- `avg`: 1d array in format (time), where every value is spatial standard deviation at that time
+"""
 function spatial_std(array)
    avg = similar(array)[1,1,:]
    for i in range(1, stop = size(array)[3], step = 1)
