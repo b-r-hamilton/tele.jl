@@ -1,7 +1,8 @@
 module tele
 using NCDatasets, Dates, PyCall, Revise, PyPlot, Statistics, NaNMath
 
-export read_netcdf, contplot, anomaly, batch_open, character, filtseriesplot, fftplot, yearly_mean, spatial_mean, temp_mean
+export read_netcdf, contplot, anomaly, batch_open, character,filtseriesplot,
+normalequation, fftplot, yearly_mean, spatial_mean, temp_mean, plot_eofs, plot_corr, plot_reg
 
 const ccrs = PyNULL()
 const cfeature = PyNULL()
@@ -40,7 +41,10 @@ end
 - `path`: string, path to netcdf file
 - `varname`: string, name of variable you want to read
 - `bbox`: geographic bounding box in format [latmin, latmax, lonmin, lonmax]
-# Output
+# Outputlat_diff = pi*r_e / 180 #km/°latlat_diflat_diff = pi*r_e / 180 #km/°lat
+f = pi*r_e / 180 #km/°lat
+
+
 - `lat`: subsetted lat
 - `lon`: subsetted lon
 - `time`: subsetted time
@@ -50,19 +54,71 @@ function read_netcdf(path, varname, bbox)
    nc = NCDataset(path, "r")
    lat, lon, time = nc_dims(nc)
    #find lat lon box indices
-   lat_flag = lat[begin] > lat[end] ? true : false
+   lat_flag = lat[begin] > lat[end] ? true : false #check if lat is reversed
    a1 = searchsortedfirst(lat, bbox[1], rev = lat_flag)
    a2 = searchsortedfirst(lat, bbox[2], rev = lat_flag)
    o1 = searchsortedfirst(lon, bbox[3])
    o2 = searchsortedfirst(lon, bbox[4])
    println([a1,a2,o1,o2])
 
-   subdata = nc[varname][minimum([o1,o2]):maximum([o1,o2]), minimum([a1, a2]):maximum([a1, a2]), :]
+   #is our longitude array continuous - not true for CESM
+   if maximum(abs.(diff(lon))) > 100
+      ind = findall(>(100), abs.(diff(lon)))[1]
+      lon1 = lon[begin:ind-1]
+      lon2 = lon[ind:end]
+
+
+      o1 = searchsortedfirst(lon1, bbox[3])
+
+      bool = zeros(2)
+      if o1 == 1
+         o1 = searchsortedfirst(lon2, bbox[3])
+         bool[1] = 1
+      end
+
+      o2 = searchsortedfirst(lon1, bbox[4])
+      if o2 == 1
+         o2 = searchsortedfirst(lon2, bbox[4])
+         bool[2] = 1
+      end
+
+      println("bool is " *string(bool))
+      if bool == zeros(2)
+         println("first bool : "* string([o1,o2]))
+         lon_sub = lon1[minimum([o1,o2]):maximum([o1,o2])]
+         subdata = nc[varname][minimum([o1,o2]):maximum([o1,o2]), minimum([a1, a2]):maximum([a1, a2]), :]
+
+      elseif bool == [1,1]
+         lon_sub = lon1[minimum([o1,o2]):maximum([o1,o2])]
+         o1 = length(lon1) + o1
+         o2 = length(lon1) + o2
+         subdata = nc[varname][minimum([o1,o2]):maximum([o1,o2]), minimum([a1, a2]):maximum([a1, a2]), :]
+      #FILLOWING CODE IS NOT TESTED - this is where I'd put my good code (if I had it)
+      # elseif bool == [0, 1]
+      #    lon_sub = vcat(lon1[o1:end], lon2[begin:o2])
+      #    subdata1 = nc[varname][o1:length(lon1), minimum([a1, a2]):maximum([a1, a2]), :]
+      #    subdata2 = nc[varname][length(lon1):o2+length(lon1), minimum([a1, a2]):maximum([a1, a2]), :]
+      #    subdata = cat(subdata1, subdata2, dims = 2)
+
+      #this works! (amazing)
+      elseif bool == [1, 0]
+         lon_sub = vcat(lon2[o1:end], lon1[begin:o2])
+         subdata1 = nc[varname][length(lon1) + o1:end, minimum([a1, a2]):maximum([a1, a2]), :]
+         subdata2 = nc[varname][begin:o2, minimum([a1, a2]):maximum([a1, a2]), :]
+         subdata = cat(subdata1, subdata2, dims = 1)
+      end
+
+   else
+      subdata = nc[varname][minimum([o1,o2]):maximum([o1,o2]), minimum([a1, a2]):maximum([a1, a2]), :]
+      lon_sub = lon[minimum([o1,o2]):maximum([o1,o2])]
+   end
+
    na = nc[varname].attrib["missing_value"]
    replace!(subdata,na => NaN)
    replace!(subdata,missing=> NaN)
    subdata = Float64.(subdata)
-   return lat[minimum([a1, a2]):maximum([a1, a2])], lon[minimum([o1,o2]):maximum([o1,o2])], time, subdata
+   return lat[minimum([a1, a2]):maximum([a1, a2])], lon_sub, time, subdata
+
 end
 
 #this is hacky!
@@ -85,12 +141,12 @@ end
 function contplot(lat,lon, data,s)
    load_python()
    figure()
-   ax = subplot(projection = ccrs.SouthPolarStereo())
+   ax = subplot(projection = ccrs.NorthPolarStereo())
    ax.gridlines()
-   ax.set_extent([-180, 0, -90, -50], ccrs.PlateCarree())
+   ax.set_extent([-180, 0, 50, 90], ccrs.PlateCarree())
    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
                      linewidth=2, color="gray", alpha=0.5, linestyle="--")
-   gl.ylabels_right = false
+   gl.right_labels = false
    ax.coastlines()
    max = NaNMath.maximum(vcat(data...))
    min = NaNMath.minimum(vcat(data...))
@@ -201,41 +257,42 @@ end
       Makes plot with 2 subplots, each has raw data, filtered data, and a trendline
 """
 function filtseriesplot(series1, series1filt, series1time, series2, series2filt, series2time, t, s)
-    figure(figsize = (10, 4))
-    subplot(1,2,1)
-    plot(series1time, series1)
-    plot(series1time[2:end], series1filt[2:end])
-    x_ind1 = range(1, stop = length(series1time), step = 1)
-    s1_avg = mean(series1filt)
-    series1filt_slope = normalequation(x_ind1, series1filt .- s1_avg)
-    series1filt_ne = series1filt_slope*x_ind1 .+ s1_avg
-    plot(series1time, series1filt_ne, color = "r")
-    xpos = series1time[1000]
-    ypos = s1_avg
-    legend(["CESM", "CESM smoothed", "CESM smoothed trend: "* string(round(series1filt_slope, digits =6))])
-    xlabel("time")
-    if s == "images/anom.pdf"
-    ylabel("SST Anomaly [σ]")
+   figure(figsize = (10, 4))
+   subplot(1,2,1)
+   plot(series1time, series1)
+   plot(series1time[2:end], series1filt[2:end])
+   x_ind1 = range(1, stop = length(series1time), step = 1)
+   s1_avg = mean(series1filt)
+   series1filt_slope = normalequation(x_ind1, series1filt .- s1_avg)
+   series1filt_ne = series1filt_slope*x_ind1 .+ s1_avg
+   plot(series1time, series1filt_ne, color = "r")
+   xpos = series1time[1000]
+   ypos = s1_avg
+   legend(["CESM", "CESM smoothed", "CESM smoothed trend: "* string(round(series1filt_slope, digits =6))])
+   xlabel("time")
+
+   if s == "images/anom.pdf"
+      ylabel("SST Anomaly [σ]")
    else
       ylabel("SST [°C]")
    end
 
-    subplot(1,2,2)
-    plot(series2time, series2)
-    plot(series2time[50:end], series2filt[50:end])
-    x_ind2 = range(1, stop = length(series2time[50:end]), step = 1)
-    s2_avg = mean(series2filt[50:end])
-    print(s2_avg)
-    series2filt_slope = normalequation(x_ind2, series2filt[50:end] .- s2_avg)
-    series2filt_ne = series2filt_slope*x_ind2 .+ s2_avg
-    plot(series2time[50:end], series2filt_ne, color = "r")
-    xpos = series2time[1000]
-    ypos = s2_avg
-    xlabel("time")
-    legend(["ERSST", "ERSST smoothed", "ERSST smoothed trend: " * string(round(series2filt_slope, digits =6))])
-    suptitle(t)
-    savefig(s)
-    close()
+   subplot(1,2,2)
+   plot(series2time, series2)
+   plot(series2time[50:end], series2filt[50:end])
+   x_ind2 = range(1, stop = length(series2time[50:end]), step = 1)
+   s2_avg = mean(series2filt[50:end])
+   print(s2_avg)
+   series2filt_slope = normalequation(x_ind2, series2filt[50:end] .- s2_avg)
+   series2filt_ne = series2filt_slope*x_ind2 .+ s2_avg
+   plot(series2time[50:end], series2filt_ne, color = "r")
+   xpos = series2time[1000]
+   ypos = s2_avg
+   xlabel("time")
+   legend(["ERSST", "ERSST smoothed", "ERSST smoothed trend: " * string(round(series2filt_slope, digits =6))])
+   suptitle(t)
+   savefig(s)
+   close()
 end
 
 """
@@ -373,4 +430,91 @@ function spatial_std(array)
    end
    return avg
 end
+
+function plot_eofs(solver, lon, lat, time, s)
+   load_python()
+   eofs = solver.eofs(neofs=2)
+   pcs = solver.pcs(npcs = 2, pcscaling = 1)
+   var = solver.varianceFraction()
+
+   figure(figsize = (12, 5))
+   ax = subplot(2,2,1, projection = ccrs.PlateCarree())
+   gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
+                     linewidth=2, color="gray", alpha=0.5, linestyle="--")
+   gl.right_labels = false
+   gl.top_labels = false
+
+   pc = contourf(lon, lat, transpose(eofs[1, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree())
+   frac = 0.013
+   cb = colorbar(pc, fraction = frac)
+   ax.coastlines()
+   cb.set_label("SST Anomaly [σ]")
+   title("EOF1, Exp. Var = " *string(round(var[1]*100, digits = 2)) * "%")
+   subplot(2,2,3)
+   plot(time, pcs[:, 1])
+   title("PC1")
+
+   ax = subplot(2,2,2, projection = ccrs.PlateCarree())
+   gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
+                     linewidth=2, color="gray", alpha=0.5, linestyle="--")
+   gl.right_labels = false
+   gl.top_labels = false
+   gl.left_labels = false
+   pc = contourf(lon, lat, transpose(eofs[2, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree())
+   cb = colorbar(pc, fraction = frac)
+   ax.coastlines()
+   cb.set_label("SST Anomaly [σ]")
+   title("EOF2, Exp. Var = " *string(round(var[2]*100, digits = 2)) * "%")
+   subplot(2,2,4)
+   plot(time, pcs[:, 2])
+   title("PC2")
+   savefig(s)
+   close()
+end
+
+function plot_corr(xc, lat, lon, time, s)
+   load_python()
+   figure()
+   ax = subplot(2,1,1, projection = ccrs.PlateCarree())
+   ax.coastlines()
+   halfway = (size(xc)[1] - 1)/2
+   halfway = convert(Int32, halfway)
+
+   pc = contourf(lon, lat, transpose(xc[halfway, :, :]), cmap = "coolwarm")
+   cb = colorbar(pc, fraction = 0.013)
+   cb.set_label("Correlation")
+   gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
+                     linewidth=2, color="gray", alpha=0.5, linestyle="--")
+   gl.right_labels = false
+   gl.top_labels = false
+   subplot(2,1,2)
+   reshaped = zeros(size(xc)[2], size(xc)[3], size(xc)[1])
+
+   permutedims!(reshaped, xc,[2,3,1])
+   mean = spatial_mean(reshaped)
+   lag = -halfway:halfway
+   plot(lag, mean)
+   xlabel("Lag")
+   ylabel("Average")
+   savefig(s)
+   close()
+end
+
+function plot_reg(reg, lat, lon, s)
+   load_python()
+   figure()
+   ax = subplot(projection = ccrs.PlateCarree())
+   ax.coastlines()
+
+   pc = contourf(lon, lat, transpose(reg), cmap = "coolwarm")
+   cb = colorbar(pc, fraction = 0.013)
+   cb.set_label("Regression Coefficient")
+   gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
+                     linewidth=2, color="gray", alpha=0.5, linestyle="--")
+   gl.right_labels = false
+   gl.top_labels = false
+   savefig(s)
+   close()
+end
+
 end

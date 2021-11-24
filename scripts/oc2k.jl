@@ -18,7 +18,7 @@ savetype = ".pdf"
 
 #READ NETCDFS TO BOUNDING BOX
 #Shevenell = -64.87, -64.2
-bbox = [-63, -65, 295, 297]
+bbox = [71, 55, 290, 350]
 
 (latc, lonc, timec1, datac1) = read_netcdf(cesm_p1, "tos", bbox)
 (latc, lonc, timec, datac) = read_netcdf(cesm_p2, "tos", bbox)
@@ -74,5 +74,5 @@ ind = findall(>(thresh), tavgc_raw)
 extreme1 = temp_mean(datac[:,:, ind])
 extreme2 = temp_mean(anomc[:,:, ind])
 
-#Plot extreme value anomalies 
+#Plot extreme value anomalies
 contplot(latc,lonc,extreme2, "images/ext_anom_lm"*savetype)

@@ -12,14 +12,13 @@ cesm_p2 = data_dir * "tos_Omon_CCSM4_historical_r1i1p1_185001-200512.nc"
 
 
 #READ NETCDFS TO BOUNDING BOX
-bbox = [-75, -55, 290, 315]
+bbox = [71, 55, 290, 350]
 (late, lone, timee, datae) = read_netcdf(ersst_p, "sst", bbox)
 (latc, lonc, timec, datac) = read_netcdf(cesm_p2, "tos", bbox)
 
 #FILTER CHARACTERISTICS
 responsetype = Lowpass(0.1*10^(-7),fs = 3.80265176 * 10^(-7))
 designmethod = Butterworth(4)
-
 
 #COMPUTE TIME SERIES (MEAN OVER BBOX, MEAN ANOMALY OVER BBOX, FILTER EACH)
 #ersst
@@ -41,7 +40,7 @@ tavgc_anom_filt = filt(digitalfilter(responsetype, designmethod), tavgc_anom)
 tavgc_raw_filt = filt(digitalfilter(responsetype, designmethod), tavgc_raw)
 
 #Make contour plots
-savetype = ".pdf"
+savetype = ".png"
 contplot(latc,lonc,temp_mean(datac), "images/datac"*savetype)
 contplot(late,lone,temp_mean(datae), "images/datae"*savetype)
 contplot(latc,lonc,temp_mean(anomc), "images/anomc"*savetype)
@@ -93,12 +92,12 @@ push!(df, character(tavge_raw))
 push!(df, character(tavgc_raw))
 
 quant = quantile(tavgc_raw, [0.25, 0.5, 0.75])
-thresh = (quant[3] - quant[1])* 1.5 + quant[3]
+thresh = (quant[3] - quant[1])* 1 + quant[3]
 ind = findall(>(thresh), tavgc_raw)
 
 extreme1 = temp_mean(datac[:,:, ind])
 extreme2 = temp_mean(anomc[:,:, ind])
 
-#Pot extreme values 
+#Pot extreme values
 contplot(latc,lonc,extreme1, "images/ext_raw"*savetype)
 contplot(latc,lonc,extreme2, "images/ext_anom"*savetype)
