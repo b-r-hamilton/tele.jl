@@ -141,9 +141,9 @@ end
 function contplot(lat,lon, data,s)
    load_python()
    figure()
-   ax = subplot(projection = ccrs.NorthPolarStereo())
+   ax = subplot(projection = ccrs.PlateCarree())
    ax.gridlines()
-   ax.set_extent([-180, 0, 50, 90], ccrs.PlateCarree())
+   #ax.set_extent([-180, 0, 50, 90], ccrs.PlateCarree())
    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
                      linewidth=2, color="gray", alpha=0.5, linestyle="--")
    gl.right_labels = false
@@ -154,10 +154,10 @@ function contplot(lat,lon, data,s)
    val = maximum([abs(max), abs(min)])
 
    cf = contourf(lon,lat,transpose(data), cmap = "coolwarm", levels = range(-val, stop = val, length = 10), transform=ccrs.PlateCarree())
-   cb = colorbar(cf)
+   cb = colorbar(cf, fraction = 0.015)
    cb.set_label("SST [σ]")
    tight_layout()
-   savefig(s)
+   savefig(s,bbox_inches="tight")
    close()
 end
 
@@ -259,13 +259,14 @@ end
 function filtseriesplot(series1, series1filt, series1time, series2, series2filt, series2time, t, s)
    figure(figsize = (10, 4))
    subplot(1,2,1)
+   shift = 50
    plot(series1time, series1)
-   plot(series1time[2:end], series1filt[2:end])
-   x_ind1 = range(1, stop = length(series1time), step = 1)
-   s1_avg = mean(series1filt)
-   series1filt_slope = normalequation(x_ind1, series1filt .- s1_avg)
+   plot(series1time[shift:end], series1filt[shift:end])
+   x_ind1 = range(1, stop = length(series1time[shift:end]), step = 1)
+   s1_avg = mean(series1filt[shift:end])
+   series1filt_slope = normalequation(x_ind1, series1filt[shift:end] .- s1_avg)
    series1filt_ne = series1filt_slope*x_ind1 .+ s1_avg
-   plot(series1time, series1filt_ne, color = "r")
+   plot(series1time[shift:end], series1filt_ne, color = "r")
    xpos = series1time[1000]
    ypos = s1_avg
    legend(["CESM", "CESM smoothed", "CESM smoothed trend: "* string(round(series1filt_slope, digits =6))])
@@ -279,13 +280,14 @@ function filtseriesplot(series1, series1filt, series1time, series2, series2filt,
 
    subplot(1,2,2)
    plot(series2time, series2)
-   plot(series2time[50:end], series2filt[50:end])
-   x_ind2 = range(1, stop = length(series2time[50:end]), step = 1)
-   s2_avg = mean(series2filt[50:end])
+   shift = 50
+   plot(series2time[shift:end], series2filt[shift:end])
+   x_ind2 = range(1, stop = length(series2time[shift:end]), step = 1)
+   s2_avg = mean(series2filt[shift:end])
    print(s2_avg)
-   series2filt_slope = normalequation(x_ind2, series2filt[50:end] .- s2_avg)
+   series2filt_slope = normalequation(x_ind2, series2filt[shift:end] .- s2_avg)
    series2filt_ne = series2filt_slope*x_ind2 .+ s2_avg
-   plot(series2time[50:end], series2filt_ne, color = "r")
+   plot(series2time[shift:end], series2filt_ne, color = "r")
    xpos = series2time[1000]
    ypos = s2_avg
    xlabel("time")
@@ -326,13 +328,14 @@ function fftplot(ffte_freq, ffte, s, t)
    else
       ax.plot(ffte_freq[begin+1:halfway], abs.(ffte)[begin+1:halfway])
    end
-   xt = range(ffte_freq[begin + 1], stop = ffte_freq[halfway], step = 2*10^(-10) * 100)
+   xt = range(ffte_freq[begin + 1], stop = ffte_freq[halfway], step = 2*10^(-10) * 10)
    ax.set_xticks(xt)
    ax.set_xlabel("Frequency [Hz]")
    ax.set_ylabel("Intensity")
 
    #ax.set_ylim([0, 750])
-   ax.set_xlim(ffte_freq[begin+1], ffte_freq[halfway])
+   ax.set_xlim(ffte_freq[begin+1], 2 * 0.1*10^(-7))
+   ax.set_ylim(0, 500)
    ax.grid()
    title(t)
    savefig(s)
@@ -436,6 +439,11 @@ function plot_eofs(solver, lon, lat, time, s)
    eofs = solver.eofs(neofs=2)
    pcs = solver.pcs(npcs = 2, pcscaling = 1)
    var = solver.varianceFraction()
+   vmin = NaNMath.minimum(eofs)
+   vmax = NaNMath.maximum(eofs)
+
+   vmin = abs(vmin) > abs(vmax) ? vmin : -vmax
+   vmax = abs(vmax) > abs(vmin) ? vmax : -vmin
 
    figure(figsize = (12, 5))
    ax = subplot(2,2,1, projection = ccrs.PlateCarree())
@@ -444,14 +452,18 @@ function plot_eofs(solver, lon, lat, time, s)
    gl.right_labels = false
    gl.top_labels = false
 
-   pc = contourf(lon, lat, transpose(eofs[1, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree())
+   pc = contourf(lon, lat, transpose(eofs[1, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree(), vmin = vmin, vmax = vmax)
    frac = 0.013
    cb = colorbar(pc, fraction = frac)
    ax.coastlines()
    cb.set_label("SST Anomaly [σ]")
    title("EOF1, Exp. Var = " *string(round(var[1]*100, digits = 2)) * "%")
-   subplot(2,2,3)
+   ax = subplot(2,2,3)
    plot(time, pcs[:, 1])
+   ax.set_ylim(-2.5, 2.5)
+   xlabel("time [years]")
+   ax.set_xlim(Dates.DateTime(1860,1,1), time[end])
+   grid()
    title("PC1")
 
    ax = subplot(2,2,2, projection = ccrs.PlateCarree())
@@ -460,15 +472,19 @@ function plot_eofs(solver, lon, lat, time, s)
    gl.right_labels = false
    gl.top_labels = false
    gl.left_labels = false
-   pc = contourf(lon, lat, transpose(eofs[2, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree())
+   pc = contourf(lon, lat, transpose(eofs[2, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree(), vmin = vmin, vmax = vmax )
    cb = colorbar(pc, fraction = frac)
    ax.coastlines()
    cb.set_label("SST Anomaly [σ]")
    title("EOF2, Exp. Var = " *string(round(var[2]*100, digits = 2)) * "%")
-   subplot(2,2,4)
+   ax = subplot(2,2,4)
    plot(time, pcs[:, 2])
+   xlabel("time [years]")
+   ax.set_ylim(-2.5, 2.5)
+   ax.set_xlim(Dates.DateTime(1860,1,1), time[end])
    title("PC2")
-   savefig(s)
+   grid()
+   savefig(s,bbox_inches="tight")
    close()
 end
 
@@ -479,8 +495,13 @@ function plot_corr(xc, lat, lon, time, s)
    ax.coastlines()
    halfway = (size(xc)[1] - 1)/2
    halfway = convert(Int32, halfway)
+   vmin = NaNMath.minimum(xc)
+   vmax = NaNMath.maximum(xc)
 
-   pc = contourf(lon, lat, transpose(xc[halfway, :, :]), cmap = "coolwarm")
+   vmin = abs(vmin) > abs(vmax) ? vmin : -vmax
+   vmax = abs(vmax) > abs(vmin) ? vmax : -vmin
+
+   pc = contourf(lon, lat, transpose(xc[halfway, :, :]), cmap = "coolwarm", transform = ccrs.PlateCarree(), vmin = vmin, vmax = vmax)
    cb = colorbar(pc, fraction = 0.013)
    cb.set_label("Correlation")
    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
@@ -494,9 +515,9 @@ function plot_corr(xc, lat, lon, time, s)
    mean = spatial_mean(reshaped)
    lag = -halfway:halfway
    plot(lag, mean)
-   xlabel("Lag")
-   ylabel("Average")
-   savefig(s)
+   xlabel("Lag [Months]")
+   ylabel("Autocorrelation")
+   savefig(s,bbox_inches="tight")
    close()
 end
 
@@ -505,15 +526,22 @@ function plot_reg(reg, lat, lon, s)
    figure()
    ax = subplot(projection = ccrs.PlateCarree())
    ax.coastlines()
+   vmin = NaNMath.minimum(reg)
+   vmax = NaNMath.maximum(reg)
 
-   pc = contourf(lon, lat, transpose(reg), cmap = "coolwarm")
-   cb = colorbar(pc, fraction = 0.013)
+   vmin = vmin < 0 ? vmin : -vmin
+   vmin = abs(vmin) > abs(vmax) ? vmin : -vmax
+   vmax = abs(vmax) > abs(vmin) ? vmax : -vmin
+
+   pc = contourf(lon, lat, transpose(reg), cmap = "coolwarm", vmin = vmin, vmax = vmax)
+   cb = colorbar(pc, fraction = 0.013, format="%.0e")
    cb.set_label("Regression Coefficient")
    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=true,
                      linewidth=2, color="gray", alpha=0.5, linestyle="--")
    gl.right_labels = false
    gl.top_labels = false
-   savefig(s)
+
+   savefig(s,bbox_inches="tight")
    close()
 end
 

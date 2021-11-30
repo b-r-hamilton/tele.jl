@@ -20,35 +20,45 @@ bbox = [71, 55, 290, 350]
 responsetype = Lowpass(0.1*10^(-7),fs = 3.80265176 * 10^(-7))
 designmethod = Butterworth(4)
 
-#COMPUTE TIME SERIES (MEAN OVER BBOX, MEAN ANOMALY OVER BBOX, FILTER EACH)
-#ersst
-anome = anomaly(datae, timee)
-tavge_anom = spatial_mean(anome)
+#Compute raw average time series over bounding box
+datac = datac .- 273.15 #convert to celsius
 tavge_raw = spatial_mean(datae)
-tavge_anom_filt = filt(digitalfilter(responsetype, designmethod), tavge_anom)
-tavge_raw_filt = filt(digitalfilter(responsetype, designmethod), tavge_raw)
+tavgc_raw = spatial_mean(datac)
+
+#ersst
+dataep = zeros(length(timee), length(lone), length(late))
+permutedims!(dataep, datae, [3,1,2])
+filte = filt(digitalfilter(responsetype, designmethod), dataep)
+permutedims!(datae, filte, [2,3,1])
+anome = anomaly(datae, timee)
+#filte holds filtered anomalized data
 
 #cesm
 timec = reinterpret(typeof(timee[begin]), timec) #convert from DatetimeNoLeap to DateTime
-# datac = Float32.(datac) #convert to Float32 (used to be Union{Missing, Float32} but our missing are gone anyways)
-datac = datac .- 273.15 #convert to celsius
 
+datacp = zeros(length(timec), length(lonc), length(latc))
+permutedims!(datacp, datac, [3,1,2])
+filtc = filt(digitalfilter(responsetype, designmethod), datacp)
+permutedims!(datac, filtc, [2,3,1])
 anomc = anomaly(datac, timec)
+#filtc holds filtered, anomalized data
+
+#filtered, anomalized time series
+tavge_anom = spatial_mean(anome)
 tavgc_anom = spatial_mean(anomc)
-tavgc_raw = spatial_mean(datac)
-tavgc_anom_filt = filt(digitalfilter(responsetype, designmethod), tavgc_anom)
-tavgc_raw_filt = filt(digitalfilter(responsetype, designmethod), tavgc_raw)
+
+
 
 #Make contour plots
-savetype = ".png"
+savetype = ".pdf"
 contplot(latc,lonc,temp_mean(datac), "images/datac"*savetype)
 contplot(late,lone,temp_mean(datae), "images/datae"*savetype)
 contplot(latc,lonc,temp_mean(anomc), "images/anomc"*savetype)
 contplot(late,lone,temp_mean(anome), "images/anome"*savetype)
 
 #Make time series plots
-filtseriesplot(tavgc_raw, tavgc_raw_filt, timec, tavge_raw, tavge_raw_filt, timee, "", "images/raw"*savetype)
-filtseriesplot(tavgc_anom, tavgc_anom_filt, timec, tavge_anom, tavge_anom_filt, timee, "", "images/anom"*savetype)
+filtseriesplot(tavgc_raw, tavgc_anom, timec, tavge_raw, tavge_anom, timee, "", "images/timeseries"*savetype)
+# filtseriesplot(tavgc_anom, tavgc_anom_filt, timec, tavge_anom, tavge_anom_filt, timee, "", "images/anom"*savetype)
 
 #COMPUTE FFTs
 ffte_raw = fft(tavge_raw)
@@ -65,16 +75,20 @@ fftplot(fftc_freq[:], [fftc_raw, fftc_anom], "images/fftc"*savetype, "CESM")
 
 #Plot FFT
 figure()
+ax = subplot()
 halfway = 1006
-plot(ffte_freq[begin+1:halfway], abs.(ffte_raw)[begin+1:halfway], alpha = 0.5)
+plot(ffte_freq[begin+1:halfway], abs.(ffte_anom)[begin+1:halfway], alpha = 0.5)
 halfway = 936
-plot(fftc_freq[begin+1:halfway], abs.(fftc_raw)[begin+1:halfway], alpha = 0.5)
-ylabel("Frequency [Hz]")
-xlabel("Intensity")
+plot(fftc_freq[begin+1:halfway], abs.(fftc_anom)[begin+1:halfway], alpha = 0.5)
+text(7 * 10 ^-10, 400, "f = 5.5 × 10^(-10) Hz")
+text(7 * 10 ^-10, 380, "T = 47 years")
+ax.set_xlim(ffte_freq[begin+1], 2 * 0.1*10^(-7))
+ax.set_ylim(0, 500)
+xlabel("Frequency [Hz]")
+ylabel("Intensity")
 legend(["ERSST", "CESM"])
 savefig("images/fftec"*savetype)
 close()
-
 
 #histogram
 #fig2b - boxplotGPCC Total # of Precips Obs
